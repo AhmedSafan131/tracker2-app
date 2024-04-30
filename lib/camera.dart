@@ -1,100 +1,93 @@
-import 'dart:typed_data';
-
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:tflite/tflite.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Tflite.loadModel(
-    model: 'assets/model.tflite',
-    labels: 'assets/labels.txt',
-  );
   final cameras = await availableCameras();
+  final frontCamera = cameras.firstWhere(
+      (camera) => camera.lensDirection == CameraLensDirection.front);
 
   runApp(MaterialApp(
-    home: CameraApp(cameras: cameras),
+    debugShowCheckedModeBanner: false,
+    home: CameraScreen(initialCamera: frontCamera, cameras: cameras),
   ));
 }
 
-class CameraApp extends StatefulWidget {
+class CameraScreen extends StatefulWidget {
+  final CameraDescription initialCamera;
   final List<CameraDescription> cameras;
 
-  CameraApp({required this.cameras});
+  const CameraScreen(
+      {Key? key, required this.initialCamera, required this.cameras})
+      : super(key: key);
 
   @override
-  _CameraAppState createState() => _CameraAppState();
+  _CameraScreenState createState() => _CameraScreenState();
 }
 
-class _CameraAppState extends State<CameraApp> {
+class _CameraScreenState extends State<CameraScreen> {
   late CameraController _controller;
-  int _selectedCameraIndex = 0;
-  List _recognitions = [];
+  late int _selectedCameraIndex;
+  bool _isDetecting = false;
 
   @override
   void initState() {
     super.initState();
-    _initCamera(_selectedCameraIndex);
+    _selectedCameraIndex =
+        widget.cameras.indexWhere((camera) => camera == widget.initialCamera);
+    _initializeCamera(widget.initialCamera);
+    _loadModel();
   }
 
-  void _initCamera(int index) async {
+  void _initializeCamera(CameraDescription camera) async {
     _controller = CameraController(
-      widget.cameras[index],
+      camera,
       ResolutionPreset.medium,
     );
-
     await _controller.initialize();
-
-    if (mounted) {
-      setState(() {});
+    if (!mounted) {
+      return;
     }
+    setState(() {});
+  }
 
-    _controller.startImageStream((CameraImage img) {
-      if (img.format.group == ImageFormatGroup.yuv420) {
-        _classifyFrame(img);
-      }
+  void _loadModel() async {
+    await Tflite.loadModel(
+      model: 'assets/model.tflite',
+    );
+    print("Model is running"); // Print when the model is loaded
+  }
+
+  void _toggleCamera() {
+    setState(() {
+      _selectedCameraIndex = (_selectedCameraIndex + 1) % widget.cameras.length;
+      final newCamera = widget.cameras[_selectedCameraIndex];
+      _initializeCamera(newCamera);
     });
   }
 
-  void _classifyFrame(CameraImage img) async {
-    final ByteData allBytes = ByteData(img.width * img.height);
+  void _runDrowsinessDetection(CameraImage img) async {
+    if (!_isDetecting) {
+      _isDetecting = true;
+      print("Running drowsiness detection"); // Add this line
+      var recognitions = await Tflite.runModelOnFrame(
+        bytesList: img.planes.map((plane) => plane.bytes).toList(),
+        imageHeight: img.height,
+        imageWidth: img.width,
+        imageMean: 127.5,
+        imageStd: 127.5,
+        numResults: 2,
+        threshold: 0.1,
+        asynch: true,
+      );
 
-    int planeIndex = 0;
-    for (final Plane plane in img.planes) {
-      final Uint8List bytes = plane.bytes;
-      for (int i = 0; i < bytes.length; i++) {
-        allBytes.setUint8(planeIndex + i, bytes[i]);
-      }
-      planeIndex += bytes.length;
-    }
-
-    final predictions = await Tflite.runModelOnFrame(
-      bytesList: [allBytes.buffer.asUint8List()],
-      imageHeight: img.height,
-      imageWidth: img.width,
-      imageMean: 127.5,
-      imageStd: 127.5,
-      numResults: 5,
-      rotation: 90,
-      threshold: 0.5,
-    );
-
-    if (predictions != null && predictions.isNotEmpty) {
       setState(() {
-        _recognitions = predictions;
+        // Update UI if necessary
       });
+
+      _isDetecting = false;
     }
-  }
-
-  void _toggleCamera() async {
-    final newIndex = _selectedCameraIndex == 0 ? 1 : 0; // Flip between cameras
-
-    if (_controller != null) {
-      await _controller.dispose(); // Dispose the current controller
-    }
-
-    _selectedCameraIndex = newIndex;
-    _initCamera(newIndex);
   }
 
   @override
@@ -112,39 +105,15 @@ class _CameraAppState extends State<CameraApp> {
 
     return Scaffold(
       appBar: AppBar(
-        centerTitle: true,
-        title: Text(
-          'Tracker',
-          style: TextStyle(
-            color: Colors.white, // Set text color to white
-          ),
-        ),
-        backgroundColor: Color(0xFF141436),
-        iconTheme: IconThemeData(
-          color: Colors.white, // Set icon (arrow) color to white
-        ),
+        title: Text('Tracker'),
       ),
-      body: Center(
-        child: Stack(
-          children: [
-            CameraPreview(_controller),
-            Positioned(
-              bottom: 20,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    onPressed: _toggleCamera,
-                    icon: Icon(Icons.switch_camera),
-                    color: Colors.white,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      body: AspectRatio(
+        aspectRatio: _controller.value.aspectRatio,
+        child: CameraPreview(_controller),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _toggleCamera,
+        child: Icon(Icons.switch_camera),
       ),
     );
   }

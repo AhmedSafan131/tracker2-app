@@ -9,7 +9,7 @@ import 'SplashScreenPage.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final cameras = await availableCameras();
-  final firstCamera = cameras.first;
+  final initialCamera = cameras.first;
 
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -18,8 +18,9 @@ void main() async {
       '/SplashScreenPage_route': (context) => SplashScreenPage(),
       '/AnimationPage_route': (context) => AnimationPage(),
       '/option_route': (context) => Option(),
-      '/camera_route': (context) =>
-          CameraApp(cameras: cameras), // Pass the camera parameter here.
+      '/camera_route': (context) => CameraScreen(
+          initialCamera: initialCamera,
+          cameras: cameras), // Pass the camera parameter here.
     },
   ));
 }
